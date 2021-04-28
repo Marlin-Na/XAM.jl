@@ -51,22 +51,36 @@ function Base.iterate(iter::OverlapIterator)
         throw(ArgumentError("sequence name $(iter.refname) is not found in the header"))
     end
     @assert iter.reader.index !== nothing
+    # TODO: Use a method that resets the reading position.
     chunks = Indexes.overlapchunks(iter.reader.index.index, refindex, iter.interval)
-    if !isempty(chunks)
-        seek(iter.reader, first(chunks).start)
-    end
-    state = OverlapIteratorState(refindex, chunks, 1, Record())
+    state = OverlapIteratorState(refindex, chunks, 0, Record())
+
     return iterate(iter, state)
 end
 
-function Base.iterate(iter::OverlapIterator, state)
+function done(iter::OverlapIterator, state)
+    buffer = BioGenerics.IO.stream(iter.reader)
+    source = iter.reader.stream
+
+    if state.chunkid == 0
+        if isempty(state.chunks)
+            return true
+        end
+        state.chunkid += 1
+        seek(source, state.chunks[state.chunkid].start)
+    end
+
     while state.chunkid ≤ lastindex(state.chunks)
         chunk = state.chunks[state.chunkid]
-        while BGZFStreams.virtualoffset(iter.reader.stream) < chunk.stop
+        #=
+        The `virtualoffset(source)` is not synchronized with the current reading position because data are buffered in `buffer` for parsing text.
+        So we need to check not only `virtualoffset` but also `nb_available`, which returns the current buffered data size.
+        =#
+        while bytesavailable(buffer) > 0 || BGZFStreams.virtualoffset(source) < chunk.stop
             read!(iter.reader, state.record)
             c = compare_intervals(state.record, (state.refindex, iter.interval))
-            if c == 0
-                return copy(state.record), state
+            if c == 0  # overlapping
+                return false
             end
             if c > 0
                 # no more overlapping records in this chunk since records are sorted
@@ -78,8 +92,18 @@ function Base.iterate(iter::OverlapIterator, state)
             seek(iter.reader, state.chunks[state.chunkid].start)
         end
     end
-    return nothing
+    # no more overlapping records
+    return true
 end
+
+function Base.iterate(iter::OverlapIterator, state)
+    if done(iter, state)
+        return nothing
+    end
+
+    return copy(state.record), state
+end
+
 
 function compare_intervals(record::Record, interval::Tuple{Int,UnitRange{Int}})
     rid = refid(record)
