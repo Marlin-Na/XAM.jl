@@ -7,7 +7,7 @@ using BioGenerics
 using GenomicFeatures
 using XAM.SAM
 
-import BGZFStreams
+import CodecBGZF
 import BioAlignments
 import Indexes
 import BioSequences

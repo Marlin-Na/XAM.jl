@@ -10,10 +10,10 @@ Create a data reader of the BAM file format.
 * `input`: data source
 * `index=nothing`: filepath to a random access index (currently *bai* is supported)
 """
-mutable struct Reader{T} <: BioGenerics.IO.AbstractReader
-    stream::BGZFStreams.BGZFStream{T}
+mutable struct Reader{T<:CodecBGZF.BGZFDecompressorStream} <: BioGenerics.IO.AbstractReader
+    stream::T
     header::SAM.Header
-    start_offset::BGZFStreams.VirtualOffset
+    start_offset::CodecBGZF.VirtualOffset
     refseqnames::Vector{String}
     refseqlens::Vector{Int}
     index::Union{Nothing, BAI}
@@ -64,7 +64,7 @@ function header(reader::Reader; fillSQ::Bool=false)::SAM.Header
     return header
 end
 
-function Base.seek(reader::Reader, voffset::BGZFStreams.VirtualOffset)
+function Base.seek(reader::Reader, voffset::CodecBGZF.VirtualOffset)
     seek(reader.stream, voffset)
 end
 
@@ -80,7 +80,7 @@ function Base.iterate(reader::Reader, nextone = Record())
 end
 
 # Initialize a BAM reader by reading the header section.
-function init_bam_reader(input::BGZFStreams.BGZFStream)
+function init_bam_reader(input::CodecBGZF.BGZFDecompressorStream)
     # magic bytes
     B = read(input, UInt8)
     A = read(input, UInt8)
@@ -108,9 +108,7 @@ function init_bam_reader(input::BGZFStreams.BGZFStream)
         refseqlens[i] = seqlen
     end
 
-    voffset = isa(input.io, Base.AbstractPipe) ?
-        BGZFStreams.VirtualOffset(0, 0) :
-        BGZFStreams.virtualoffset(input)
+    voffset = CodecBGZF.VirtualOffset(input)
 
     return Reader(
         input,
@@ -122,7 +120,7 @@ function init_bam_reader(input::BGZFStreams.BGZFStream)
 end
 
 function init_bam_reader(input::IO)
-    return init_bam_reader(BGZFStreams.BGZFStream(input))
+    return init_bam_reader(CodecBGZF.BGZFDecompressorStream(input))
 end
 
 function _read!(reader::Reader, record)
